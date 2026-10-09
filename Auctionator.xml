@@ -487,9 +487,9 @@
       </Frame>
 
 
-      <Button name="Auctionator1Button" inherits="UIPanelButtonTemplate" text="Auctionator">
+      <Button name="Auctionator1Button" inherits="UIPanelButtonTemplate" text="Setup">
         <Size>
-          <AbsDimension x="126" y="22"/>
+          <AbsDimension x="80" y="22"/>
         </Size>
         <Anchors>
           <Anchor point="RIGHT">
@@ -504,6 +504,92 @@
           </OnClick>
         </Scripts>
       </Button>
+
+
+      <!-- Multi-post: [Stack size] [Stacks] [Post Stacks] -->
+      <Button name="AuctionatorMultiPostButton" inherits="UIPanelButtonTemplate" text="Post">
+        <Size>
+          <AbsDimension x="80" y="22"/>
+        </Size>
+        <Anchors>
+          <Anchor point="RIGHT" relativeTo="Auctionator1Button" relativePoint="LEFT">
+            <Offset>
+              <AbsDimension x="-4" y="0"/>
+            </Offset>
+          </Anchor>
+        </Anchors>
+        <Scripts>
+          <OnClick>
+            Auctionator_MultiPost_Start();
+          </OnClick>
+          <OnEnter>	Auctionator_ShowTooltip_MultiPost();	</OnEnter>
+          <OnLeave>	GameTooltip:Hide();				</OnLeave>
+        </Scripts>
+      </Button>
+
+      <EditBox name="AuctionatorMultiCount" inherits="InputBoxTemplate" letters="3" numeric="true" autoFocus="false">
+        <Size>
+          <AbsDimension x="32" y="20"/>
+        </Size>
+        <Anchors>
+          <Anchor point="RIGHT" relativeTo="AuctionatorMultiPostButton" relativePoint="LEFT">
+            <Offset>
+              <AbsDimension x="-8" y="0"/>
+            </Offset>
+          </Anchor>
+        </Anchors>
+        <Layers>
+          <Layer level="BACKGROUND">
+            <FontString inherits="GameFontNormalSmall" text="Stacks:">
+              <Anchors>
+                <Anchor point="RIGHT" relativePoint="LEFT">
+                  <Offset>
+                    <AbsDimension x="-6" y="0"/>
+                  </Offset>
+                </Anchor>
+              </Anchors>
+            </FontString>
+          </Layer>
+        </Layers>
+        <FontString inherits="ChatFontNormal"/>
+        <Scripts>
+          <OnEnterPressed>	this:ClearFocus();	</OnEnterPressed>
+          <OnEscapePressed>	this:ClearFocus();	</OnEscapePressed>
+          <OnTabPressed>	AuctionatorMultiSize:SetFocus();	</OnTabPressed>
+        </Scripts>
+      </EditBox>
+
+      <EditBox name="AuctionatorMultiSize" inherits="InputBoxTemplate" letters="3" numeric="true" autoFocus="false">
+        <Size>
+          <AbsDimension x="32" y="20"/>
+        </Size>
+        <Anchors>
+          <Anchor point="RIGHT" relativeTo="AuctionatorMultiCount" relativePoint="LEFT">
+            <Offset>
+              <AbsDimension x="-52" y="0"/>
+            </Offset>
+          </Anchor>
+        </Anchors>
+        <Layers>
+          <Layer level="BACKGROUND">
+            <FontString inherits="GameFontNormalSmall" text="Stack size:">
+              <Anchors>
+                <Anchor point="RIGHT" relativePoint="LEFT">
+                  <Offset>
+                    <AbsDimension x="-6" y="0"/>
+                  </Offset>
+                </Anchor>
+              </Anchors>
+            </FontString>
+          </Layer>
+        </Layers>
+        <FontString inherits="ChatFontNormal"/>
+        <Scripts>
+          <OnEnterPressed>	this:ClearFocus();	</OnEnterPressed>
+          <OnEscapePressed>	this:ClearFocus();	</OnEscapePressed>
+          <OnTabPressed>	AuctionatorMultiCount:SetFocus();	</OnTabPressed>
+        </Scripts>
+      </EditBox>
 
 
       <ScrollFrame name="AuctionatorScrollFrame" inherits="FauxScrollFrameTemplate">

@@ -148,6 +148,8 @@ function Auctionator_AuctionFrameTab_OnClick (index)
         Auctionator_HideElems (recommendElements);
         
         getglobal("Auctionator_Sell_Template"):Show();
+        Auctionator_UseBidArt();
+        Auctionator_FitButtonsSafe();
         AuctionFrame:EnableMouse(false);
         
         OpenAllBags(true);
@@ -244,6 +246,435 @@ end
 
 function Auctionator_OnNewAuctionUpdate()
 
+
+end
+
+-----------------------------------------
+-- Multi-post: split the item in the Auction Item slot into
+-- several stacks of a given size and post them one by one.
+-- Runs as a small state machine driven from OnUpdate because
+-- every step has to wait for the server.
+--
+--   release -> next -> placed -> posting -> next -> ... -> done
+-----------------------------------------
+
+local multi = nil;			-- nil when idle, otherwise the state of the running batch
+
+local MULTI_STEP_DELAY	= 0.3;	-- seconds between steps
+local MULTI_TIMEOUT		= 8;	-- seconds to wait for the server before giving up
+
+-----------------------------------------
+-- Scans the bags for 'name'.
+-- Returns: number of stacks of 'size' that can be made,
+--          bag, slot, count of the best unlocked source slot (nil if none),
+--          and whether a suitable slot exists but is still locked.
+-----------------------------------------
+
+function Auctionator_MultiPost_FindItems (name, size)
+
+    local possible	= 0;
+    local pending	= false;
+    local bestBag, bestSlot, bestCount;
+    local bag, slot;
+
+    for bag = 0, 4 do
+        for slot = 1, GetContainerNumSlots (bag) do
+
+            local link = GetContainerItemLink (bag, slot);
+
+            if (link) then
+                local _, _, linkName = string.find (link, "%[(.+)%]");
+
+                if (linkName == name) then
+                    local texture, itemCount, locked = GetContainerItemInfo (bag, slot);
+
+                    if (itemCount and itemCount >= size) then
+                        possible = possible + math.floor (itemCount / size);
+
+                        if (locked) then
+                            pending = true;
+                        elseif (bestCount == nil or itemCount < bestCount) then
+                            bestBag, bestSlot, bestCount = bag, slot, itemCount;
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return possible, bestBag, bestSlot, bestCount, pending;
+end
+
+-----------------------------------------
+
+function Auctionator_MultiPost_FindEmptySlot ()
+
+    local bag, slot;
+
+    for bag = 0, 4 do
+        for slot = 1, GetContainerNumSlots (bag) do
+            if (GetContainerItemLink (bag, slot) == nil) then
+                return bag, slot;
+            end
+        end
+    end
+end
+
+-----------------------------------------
+-- The Post and Setup buttons get the size of the default Close button, so that
+-- they sit over the button slots drawn into the bottom art of the default frame.
+-----------------------------------------
+
+function Auctionator_FitButtons ()
+
+    -- AuctionFrameCloseButton is the X in the title bar; the bottom Close button belongs to each tab
+
+    local close = getglobal ("AuctionsCloseButton") or getglobal ("BidCloseButton") or getglobal ("BrowseCloseButton");
+
+    if (close == nil) then
+        return;
+    end
+
+    local w, h = close:GetWidth(), close:GetHeight();
+
+    if (w and h and w > 0 and h > 0) then
+        Auctionator1Button:SetWidth (w);
+        Auctionator1Button:SetHeight (h);
+        AuctionatorMultiPostButton:SetWidth (w);
+        AuctionatorMultiPostButton:SetHeight (h);
+    end
+
+    -- [Post] [Setup] [Close] in a row, like [Bid] [Buyout] [Close] on the Bid tab
+
+    Auctionator1Button:ClearAllPoints();
+    Auctionator1Button:SetPoint ("RIGHT", close, "LEFT", -6, 0);
+
+    AuctionatorMultiPostButton:ClearAllPoints();
+    AuctionatorMultiPostButton:SetPoint ("RIGHT", Auctionator1Button, "LEFT", -6, 0);
+end
+
+-- runs the layout; if it fails, puts the buttons back where the xml placed them
+
+function Auctionator_FitButtonsSafe ()
+
+    local ok, err = pcall (Auctionator_FitButtons);
+
+    if (not ok) then
+        chatmsg ("Auctionator: button layout failed: "..tostring(err));
+
+        Auctionator1Button:ClearAllPoints();
+        Auctionator1Button:SetPoint ("RIGHT", "Auctionator_Sell_Template", "RIGHT", -14, -163);
+
+        AuctionatorMultiPostButton:ClearAllPoints();
+        AuctionatorMultiPostButton:SetPoint ("RIGHT", "Auctionator1Button", "LEFT", -4, 0);
+    end
+end
+
+-----------------------------------------
+-- The bottom art of the default frame has a slot drawn in for every button of the
+-- current tab (on the Auctions tab: the Cancel Auction button). The Bid tab has
+-- two slots in a row, which fit Post and Setup, so borrow the Bid tab's bottom art.
+-- The default tab switch writes the textures again, so nothing has to be undone.
+-----------------------------------------
+
+function Auctionator_UseBidArt ()
+
+    local names = { "AuctionFrameBot", "AuctionFrameBotRight" };
+    local i;
+
+    for i = 1, 2 do
+        local piece = getglobal (names[i]);
+
+        if (piece and piece.GetTexture) then
+            local path = piece:GetTexture();
+
+            if (path) then
+                local newPath, n = string.gsub (path, "%-Auction%-", "-Bid-");
+
+                if (n > 0) then
+                    piece:SetTexture (newPath);
+                end
+            end
+        end
+    end
+end
+
+-----------------------------------------
+
+function Auctionator_MultiPost_Start ()
+
+    if (multi) then
+        chatmsg ("Auctionator: already posting, please wait.");
+        return;
+    end
+
+    local name, texture, count = GetAuctionSellItemInfo();
+
+    if (name == nil or name == "") then
+        chatmsg ("Auctionator: put the item into the Auction Item slot first.");
+        return;
+    end
+
+    if (CursorHasItem()) then
+        chatmsg ("Auctionator: your cursor is holding something, put it down first.");
+        return;
+    end
+
+    local size = tonumber (AuctionatorMultiSize:GetText());
+
+    if (size == nil or size < 1) then
+        chatmsg ("Auctionator: enter the stack size.");
+        return;
+    end
+
+    local possible = Auctionator_MultiPost_FindItems (name, size);
+
+    if (possible < 1) then
+        chatmsg ("Auctionator: you have no stack of "..size.." x "..name.." in your bags.");
+        return;
+    end
+
+    local stacks = tonumber (AuctionatorMultiCount:GetText());
+
+    if (stacks == nil or stacks < 1) then
+        stacks = possible;
+    elseif (stacks > possible) then
+        chatmsg ("Auctionator: only "..possible.." stack(s) of "..size.." can be made.");
+        stacks = possible;
+    end
+
+    -- the prices currently entered are for ONE stack of 'size' items; turn them into per-item prices
+
+    local now = GetTime();
+
+    multi = {};
+    multi.name			= name;
+    multi.size			= size;
+    multi.stacks		= stacks;
+    multi.posted		= 0;
+    multi.startPer		= MoneyInputFrame_GetCopper (StartPrice)  / size;
+    multi.buyoutPer		= MoneyInputFrame_GetCopper (BuyoutPrice) / size;
+    multi.state			= "release";
+    multi.nextTime		= now + MULTI_STEP_DELAY;
+    multi.deadline		= now + MULTI_TIMEOUT;
+
+    -- take the whole stack out of the slot; it is put back into the bags
+    -- in the "release" step once the slot has really emptied
+    ClickAuctionSellItemButton();
+
+end
+
+-----------------------------------------
+
+function Auctionator_MultiPost_Stop (reason, release)
+
+    local m = multi;
+    multi = nil;
+
+    if (m == nil) then
+        return;
+    end
+
+    if (release) then
+        ClearCursor();
+        ClickAuctionSellItemButton();
+        ClearCursor();
+    end
+
+    if (reason) then
+        chatmsg ("Auctionator: stopped, "..reason.." ("..m.posted.." of "..m.stacks.." stacks posted).");
+    else
+        chatmsg ("Auctionator: posted "..m.posted.." stack(s) of "..m.size.." x "..m.name..", "..tostring(m.priceText)..".");
+    end
+
+    forceMsgAreaUpdate = true;
+end
+
+-----------------------------------------
+
+function Auctionator_MultiPost_Step ()
+
+    local now = GetTime();
+
+    if (now < multi.nextTime) then
+        return;
+    end
+
+    if (now > multi.deadline) then
+        local sName, sTex, sCount = GetAuctionSellItemInfo();
+        local cursor = "no";
+        if (CursorHasItem()) then cursor = "yes"; end
+
+        chatmsg ("Auctionator debug: step="..multi.state.." slot="..tostring(sName).."/"..tostring(sCount).." cursor="..cursor);
+        Auctionator_MultiPost_Stop ("timed out in step '"..multi.state.."'", true);
+        return;
+    end
+
+    if (multi.state == "release") then
+
+        if (GetAuctionSellItemInfo() ~= nil) then
+            return;
+        end
+
+        ClearCursor();
+
+        multi.state		= "next";
+        multi.nextTime	= now + MULTI_STEP_DELAY;
+        multi.deadline	= now + MULTI_TIMEOUT;
+
+    elseif (multi.state == "next") then
+
+        if (GetAuctionSellItemInfo() ~= nil or CursorHasItem()) then
+            return;
+        end
+
+        local possible, bag, slot, itemCount, pending = Auctionator_MultiPost_FindItems (multi.name, multi.size);
+
+        if (bag == nil) then
+            if (not pending) then
+                Auctionator_MultiPost_Stop ("not enough items left", true);
+            end
+            return;
+        end
+
+        if (itemCount > multi.size) then
+
+            -- the auction slot always takes a whole bag stack, so first split
+            -- the wanted amount off into an empty bag slot
+
+            local eBag, eSlot = Auctionator_MultiPost_FindEmptySlot();
+
+            if (eBag == nil) then
+                Auctionator_MultiPost_Stop ("no free bag slot to split a stack into", true);
+                return;
+            end
+
+            SplitContainerItem (bag, slot, multi.size);
+
+            if (not CursorHasItem()) then
+                return;
+            end
+
+            PickupContainerItem (eBag, eSlot);
+
+            multi.splitBag		= eBag;
+            multi.splitSlot		= eSlot;
+            multi.state			= "splitting";
+            multi.deadline		= now + MULTI_TIMEOUT;
+            return;
+        end
+
+        PickupContainerItem (bag, slot);
+
+        if (not CursorHasItem()) then
+            return;
+        end
+
+        ClickAuctionSellItemButton();
+
+        Auctionator_SetMessage ("Posting "..multi.name.."\n\nstack "..(multi.posted + 1).." of "..multi.stacks);
+
+        multi.state		= "placed";
+        multi.deadline	= now + MULTI_TIMEOUT;
+
+    elseif (multi.state == "splitting") then
+
+        local texture, itemCount, locked = GetContainerItemInfo (multi.splitBag, multi.splitSlot);
+
+        if (itemCount == multi.size and not locked and not CursorHasItem()) then
+            multi.state		= "next";
+            multi.nextTime	= now + MULTI_STEP_DELAY;
+            multi.deadline	= now + MULTI_TIMEOUT;
+        end
+
+    elseif (multi.state == "placed") then
+
+        local sellName, sellTexture, sellCount = GetAuctionSellItemInfo();
+
+        if (sellName ~= multi.name or sellCount ~= multi.size) then
+            return;
+        end
+
+        local startPrice	= round (multi.startPer  * multi.size);
+        local buyoutPrice	= round (multi.buyoutPer * multi.size);
+
+        if (startPrice < 1) then
+            startPrice = 1;
+        end
+
+        if (buyoutPrice > 0 and buyoutPrice < startPrice) then
+            startPrice = buyoutPrice;
+        end
+
+        MoneyInputFrame_SetCopper (StartPrice,  startPrice);
+        MoneyInputFrame_SetCopper (BuyoutPrice, buyoutPrice);
+
+        local duration = AuctionFrameAuctions.duration;
+
+        local startText		= priceToString (startPrice);
+        local buyoutText	= "none";
+
+        if (buyoutPrice > 0) then
+            buyoutText = priceToString (buyoutPrice);
+        end
+
+        multi.priceText = "start "..startText..", buyout "..buyoutText.." per stack";
+
+        if (duration) then
+            StartAuction (startPrice, buyoutPrice, duration);
+        else
+            AuctionsCreateAuctionButton:Click();
+        end
+
+        multi.state		= "posting";
+        multi.deadline	= now + MULTI_TIMEOUT;
+
+    elseif (multi.state == "posting") then
+
+        if (GetAuctionSellItemInfo() ~= nil) then
+            return;
+        end
+
+        multi.posted = multi.posted + 1;
+
+        if (multi.posted >= multi.stacks) then
+            Auctionator_MultiPost_Stop (nil, false);
+        else
+            multi.state		= "next";
+            multi.nextTime	= now + MULTI_STEP_DELAY;
+            multi.deadline	= now + MULTI_TIMEOUT;
+        end
+    end
+end
+
+-----------------------------------------
+
+function Auctionator_MultiPost_OnUpdate ()
+
+    if (multi == nil) then
+        return;
+    end
+
+    if (AuctionFrame == nil or not AuctionFrame:IsShown()) then
+        Auctionator_MultiPost_Stop ("the auction house was closed", false);
+        return;
+    end
+
+    local ok, err = pcall (Auctionator_MultiPost_Step);
+
+    if (not ok) then
+        Auctionator_MultiPost_Stop ("error: "..tostring(err), true);
+    end
+end
+
+-----------------------------------------
+
+function Auctionator_ShowTooltip_MultiPost()
+
+    GameTooltip:SetOwner(this, "ANCHOR_TOP");
+    GameTooltip:SetText("Post several stacks", 0.9, 1.0, 1.0);
+    GameTooltip:AddLine("Put the item in the Auction Item slot. The Starting and Buyout prices are for ONE stack of 'Stack size' items. Auctionator splits the item into such stacks and posts them one by one. Leave 'Stacks' empty to post as many as possible.", 0.5, 0.5, 1.0, 1);
+    GameTooltip:Show();
 
 end
 
@@ -566,6 +997,8 @@ end
 
 function Auctionator_OnAuctionHouseClosed()
 
+    Auctionator_MultiPost_Stop ("the auction house was closed", false);
+
     AuctionatorOptionsFrame:Hide();
     AuctionatorDescriptionFrame:Hide();
     Auctionator_Sell_Template:Hide();
@@ -578,6 +1011,7 @@ end
 
 function Auctionator_OnUpdate(self, elapsed)
 
+    Auctionator_MultiPost_OnUpdate();
     Auctionator_Idle (self, elapsed);
 
 end
@@ -617,6 +1051,12 @@ function Auctionator_Idle(self, elapsed)
         end
     end
     
+    ------- don't rescan while a multi-post batch is swapping items in the slot -------
+
+    if (multi) then
+        return;
+    end
+
     ------- check whether the "sell" item has changed -------
 
     local auctionItemName, auctionTexture, auctionCount = GetAuctionSellItemInfo(); 
