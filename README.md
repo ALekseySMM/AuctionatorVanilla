@@ -19,6 +19,10 @@ The addon splits the stack in your bags and posts the pieces one after another, 
 
 Also changed: the *Auctionator* button is now **Setup**, and the Post / Setup buttons sit in the slots of the Bid tab art.
 
+![Stack size and Buyout Price](screenshots/ScreenShot%20152%20Github%20WOW%20addon.png)
+
+> **IMPORTANT!** Remember the rule: if the **Stack Size** field is empty, it is a regular auction. If it contains a number X, the **Buyout Price** is the price for X items!
+
 ## Installation
 
 Copy the folder into `Interface\AddOns\` and name it `Auctionator`. Interface 11200 (1.12.1).
@@ -43,6 +47,10 @@ Copy the folder into `Interface\AddOns\` and name it `Auctionator`. Interface 11
 Аддон сам делит стак в сумке и выставляет части по очереди, в конце пишет итог в чат. Нужна минимум одна свободная ячейка в сумке. Каждый стак берётся из одной ячейки (остатки в разных ячейках не объединяются).
 
 Также: кнопка *Auctionator* переименована в **Setup**, а кнопки Post и Setup стоят в пазах рисунка вкладки Bid.
+
+![Stack size и Buyout Price](screenshots/ScreenShot%20152%20Github%20WOW%20addon.png)
+
+> **ВАЖНО!** Запомните правило: если поле **Stack Size** пустое, то это обычный аукцион. Если в нём стоит число Х шт., то цена **Buyout Price** — это цена за Х штук!
 
 ### Установка
 
