@@ -487,7 +487,7 @@
       </Frame>
 
 
-      <Button name="Auctionator1Button" inherits="UIPanelButtonTemplate" text="Setup">
+      <Button name="AuctionatorBuyoutButton" inherits="UIPanelButtonTemplate" text="Buyout">
         <Size>
           <AbsDimension x="80" y="22"/>
         </Size>
@@ -500,7 +500,7 @@
         </Anchors>
         <Scripts>
           <OnClick>
-            Auctionator_ShowOptionsFrame();
+            Auctionator_Buyout_Click();
           </OnClick>
         </Scripts>
       </Button>
@@ -512,7 +512,7 @@
           <AbsDimension x="80" y="22"/>
         </Size>
         <Anchors>
-          <Anchor point="RIGHT" relativeTo="Auctionator1Button" relativePoint="LEFT">
+          <Anchor point="RIGHT" relativeTo="AuctionatorBuyoutButton" relativePoint="LEFT">
             <Offset>
               <AbsDimension x="-4" y="0"/>
             </Offset>

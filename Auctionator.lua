@@ -34,6 +34,16 @@ local scandata;
 local sorteddata = {};
 local basedata;
 
+local selected = nil;		-- the list line the user explicitly clicked (target of the Buyout button)
+local buying = nil;			-- state of a running buyout search, nil when idle
+local pendingBuy = nil;		-- the line waiting for the user to confirm in the popup
+
+local BUY_TIMEOUT = 20;		-- seconds to wait for the auction house while looking for the auction to buy
+
+local browseCleared = false;	-- Reset was pressed on the Browse tab and no new search has been sent since
+local auctionator_orig_AuctionFrameBrowse_Update;
+local auctionator_orig_QueryAuctionItems;
+
 local currentAuctionItemName = "";
 local currentAuctionStackSize = 1;
 local currentAuctionTexture = nil;
@@ -72,7 +82,7 @@ end
 
 function Auctionator_OnLoad()
 
-    chatmsg("Auctionator Loaded");
+    chatmsg("Auctionator Sherai loaded.");
 
     AuctionatorLoaded = true;
 
@@ -85,7 +95,9 @@ function Auctionator_OnAddonLoaded()
     if (string.lower (arg1) == "blizzard_auctionui") then			
         Auctionator_AddSellTab ();
         Auctionator_AddSellPanel ();
-        
+        Auctionator_AddTopButtons ();
+        Auctionator_AddBuyoutPopup ();
+
         Auctionator_SetupHookFunctions ();
         
         auctionsTabElements[1]  = AuctionsScrollFrame;
@@ -150,6 +162,7 @@ function Auctionator_AuctionFrameTab_OnClick (index)
         getglobal("Auctionator_Sell_Template"):Show();
         Auctionator_UseBidArt();
         Auctionator_FitButtonsSafe();
+        Auctionator_UpdateBuyoutButton();
         AuctionFrame:EnableMouse(false);
         
         OpenAllBags(true);
@@ -338,19 +351,19 @@ function Auctionator_FitButtons ()
     local w, h = close:GetWidth(), close:GetHeight();
 
     if (w and h and w > 0 and h > 0) then
-        Auctionator1Button:SetWidth (w);
-        Auctionator1Button:SetHeight (h);
+        AuctionatorBuyoutButton:SetWidth (w);
+        AuctionatorBuyoutButton:SetHeight (h);
         AuctionatorMultiPostButton:SetWidth (w);
         AuctionatorMultiPostButton:SetHeight (h);
     end
 
     -- [Post] [Setup] [Close] in a row, like [Bid] [Buyout] [Close] on the Bid tab
 
-    Auctionator1Button:ClearAllPoints();
-    Auctionator1Button:SetPoint ("RIGHT", close, "LEFT", -6, 0);
+    AuctionatorBuyoutButton:ClearAllPoints();
+    AuctionatorBuyoutButton:SetPoint ("RIGHT", close, "LEFT", -6, 0);
 
     AuctionatorMultiPostButton:ClearAllPoints();
-    AuctionatorMultiPostButton:SetPoint ("RIGHT", Auctionator1Button, "LEFT", -6, 0);
+    AuctionatorMultiPostButton:SetPoint ("RIGHT", AuctionatorBuyoutButton, "LEFT", -6, 0);
 end
 
 -- runs the layout; if it fails, puts the buttons back where the xml placed them
@@ -362,11 +375,11 @@ function Auctionator_FitButtonsSafe ()
     if (not ok) then
         chatmsg ("Auctionator: button layout failed: "..tostring(err));
 
-        Auctionator1Button:ClearAllPoints();
-        Auctionator1Button:SetPoint ("RIGHT", "Auctionator_Sell_Template", "RIGHT", -14, -163);
+        AuctionatorBuyoutButton:ClearAllPoints();
+        AuctionatorBuyoutButton:SetPoint ("RIGHT", "Auctionator_Sell_Template", "RIGHT", -14, -163);
 
         AuctionatorMultiPostButton:ClearAllPoints();
-        AuctionatorMultiPostButton:SetPoint ("RIGHT", "Auctionator1Button", "LEFT", -4, 0);
+        AuctionatorMultiPostButton:SetPoint ("RIGHT", "AuctionatorBuyoutButton", "LEFT", -4, 0);
     end
 end
 
@@ -395,6 +408,273 @@ function Auctionator_UseBidArt ()
                     piece:SetTexture (newPath);
                 end
             end
+        end
+    end
+end
+
+-----------------------------------------
+-- Buyout: buys the list line the user clicked. The scan only keeps a summary
+-- (stack size / price / how many), so the real auction is looked up again in the
+-- auction house page by page and bought as soon as an exact match is found.
+-----------------------------------------
+
+function Auctionator_UpdateBuyoutButton ()
+
+    local btn = getglobal ("AuctionatorBuyoutButton");
+
+    if (btn == nil) then
+        return;
+    end
+
+    if (selected and buying == nil and selected.numYours < selected.count) then
+        btn:Enable();
+    else
+        btn:Disable();
+    end
+end
+
+-----------------------------------------
+
+function Auctionator_Buyout_Click ()
+
+    if (buying or selected == nil or currentAuctionItemName == "") then
+        return;
+    end
+
+    if (processing_state ~= KM_NULL_STATE) then
+        chatmsg ("Auctionator: the scan is still running, try again in a moment.");
+        return;
+    end
+
+    if (GetMoney() < selected.buyoutPrice) then
+        chatmsg ("Auctionator: not enough money for this buyout.");
+        return;
+    end
+
+    pendingBuy = {};
+    pendingBuy.name			= currentAuctionItemName;
+    pendingBuy.stackSize	= selected.stackSize;
+    pendingBuy.buyoutPrice	= selected.buyoutPrice;
+
+    -- the default-looking confirmation; the search and the purchase start on Accept
+    StaticPopup_Show ("AUCTIONATOR_BUYOUT");
+end
+
+-----------------------------------------
+
+function Auctionator_Buyout_Accept ()
+
+    if (buying or pendingBuy == nil) then
+        return;
+    end
+
+    if (processing_state ~= KM_NULL_STATE) then
+        chatmsg ("Auctionator: the scan is still running, try again in a moment.");
+        return;
+    end
+
+    if (GetMoney() < pendingBuy.buyoutPrice) then
+        chatmsg ("Auctionator: not enough money for this buyout.");
+        return;
+    end
+
+    buying = {};
+    buying.name			= pendingBuy.name;
+    buying.stackSize	= pendingBuy.stackSize;
+    buying.buyoutPrice	= pendingBuy.buyoutPrice;
+    buying.deadline		= GetTime() + BUY_TIMEOUT;
+
+    current_page		= 0;
+    processing_state	= KM_PREQUERY;
+
+    Auctionator_UpdateBuyoutButton();
+end
+
+-----------------------------------------
+
+function Auctionator_AddBuyoutPopup ()
+
+    StaticPopupDialogs["AUCTIONATOR_BUYOUT"] = {
+        text			= BUYOUT_AUCTION_CONFIRMATION or "Buyout auction for:",
+        button1			= ACCEPT,
+        button2			= CANCEL,
+        OnShow			= function ()
+                            if (pendingBuy) then
+                                MoneyFrame_Update (this:GetName().."MoneyFrame", pendingBuy.buyoutPrice);
+                            end
+                        end,
+        OnAccept		= function () Auctionator_Buyout_Accept(); end,
+        hasMoneyFrame	= 1,
+        showAlert		= 1,
+        timeout			= 0,
+        exclusive		= 1,
+        hideOnEscape	= 1
+    };
+end
+
+-----------------------------------------
+
+function Auctionator_Buy_Done ()
+
+    if (buying == nil) then
+        return;
+    end
+
+    buying = nil;
+    processing_state = KM_NULL_STATE;
+    forceMsgAreaUpdate = true;
+end
+
+-----------------------------------------
+
+function Auctionator_Buy_OnResults ()
+
+    processing_state = KM_ANALYZING;
+
+    local numBatchAuctions = GetNumAuctionItems ("list");
+    local me = UnitName ("player");
+    local x;
+
+    for x = 1, numBatchAuctions do
+
+        local name, texture, count, quality, canUse, level, minBid, minIncrement, buyoutPrice, bidAmount, highBidder, owner = GetAuctionItemInfo ("list", x);
+
+        if (name == buying.name and count == buying.stackSize and buyoutPrice == buying.buyoutPrice and owner ~= me) then
+            PlaceAuctionBid ("list", x, buyoutPrice);
+            chatmsg ("Auctionator: buyout placed for "..count.." x "..name.." at "..priceToString (buyoutPrice)..".");
+            Auctionator_Buy_Done ();
+            return;
+        end
+    end
+
+    if (numBatchAuctions == 50) then
+        buying.deadline = GetTime() + BUY_TIMEOUT;
+        processing_state = KM_PREQUERY;			-- look at the next page
+    else
+        chatmsg ("Auctionator: that auction is no longer available.");
+        Auctionator_Buy_Done ();
+    end
+end
+
+-----------------------------------------
+
+function Auctionator_Buy_OnUpdate ()
+
+    if (buying and GetTime() > buying.deadline) then
+        chatmsg ("Auctionator: the auction house did not answer, buyout cancelled.");
+        Auctionator_Buy_Done ();
+    end
+end
+
+-----------------------------------------
+-- Setup and Reset buttons in the title bar, next to the X that closes the window
+-----------------------------------------
+
+function Auctionator_AddTopButtons ()
+
+    local close = getglobal ("AuctionFrameCloseButton");
+
+    local setup = CreateFrame ("Button", "AuctionatorSetupButton", AuctionFrame, "UIPanelButtonTemplate");
+    setup:SetWidth (62);
+    setup:SetHeight (20);
+    setup:SetText ("Setup");
+    setup:SetPoint ("RIGHT", close, "LEFT", 2, 0);
+    setup:SetScript ("OnClick", function () Auctionator_ShowOptionsFrame(); end);
+
+    local reset = CreateFrame ("Button", "AuctionatorResetButton", AuctionFrame, "UIPanelButtonTemplate");
+    reset:SetWidth (62);
+    reset:SetHeight (20);
+    reset:SetText ("Reset");
+    reset:SetPoint ("RIGHT", setup, "LEFT", -2, 0);
+    reset:SetScript ("OnClick", function () Auctionator_ResetBrowse(); end);
+end
+
+-----------------------------------------
+-- After Reset the result list of the Browse tab is shown empty. There is no way to
+-- clear the list the server sent, so the result lines are hidden after every redraw
+-- until the next auction query (any QueryAuctionItems call) is sent.
+-----------------------------------------
+
+function Auctionator_HideBrowseResults ()
+
+    local i;
+
+    for i = 1, 20 do
+        local line = getglobal ("BrowseButton"..i);
+
+        if (line) then
+            line:Hide();
+        end
+    end
+
+    if (BrowseNoResultsText) then
+        BrowseNoResultsText:Show();
+    end
+end
+
+-----------------------------------------
+
+function Auctionator_AuctionFrameBrowse_Update ()
+
+    auctionator_orig_AuctionFrameBrowse_Update ();
+
+    if (browseCleared) then
+        Auctionator_HideBrowseResults ();
+    end
+end
+
+-----------------------------------------
+
+function Auctionator_QueryAuctionItems (a, b, c, d, e, f, g, h, i)
+
+    browseCleared = false;
+
+    return auctionator_orig_QueryAuctionItems (a, b, c, d, e, f, g, h, i);
+end
+
+-----------------------------------------
+-- Reset: collapses the category tree on the left of the Browse tab and clears the
+-- level range and rarity fields. Every step is separate so that one failure does
+-- not stop the others.
+-----------------------------------------
+
+function Auctionator_ResetBrowse ()
+
+    local steps = {};
+
+    steps[1] = function ()
+        OPEN_FILTER_LIST = {};
+
+        local key, value;
+        for key, value in pairs (AuctionFrameBrowse) do
+            if (type (key) == "string" and string.find (key, "^selected")) then
+                AuctionFrameBrowse[key] = nil;
+            end
+        end
+
+        if (AuctionFrameFilters_Update) then
+            AuctionFrameFilters_Update ();
+        end
+    end
+
+    steps[2] = function () BrowseMinLevel:SetText (""); BrowseMaxLevel:SetText (""); end
+
+    steps[3] = function ()
+        UIDropDownMenu_SetSelectedValue (BrowseDropDown, -1);
+        UIDropDownMenu_SetText ("", BrowseDropDown);
+    end
+
+    steps[4] = function ()
+        browseCleared = true;
+        AuctionFrameBrowse_Update ();
+    end
+
+    local i;
+    for i = 1, 4 do
+        local ok, err = pcall (steps[i]);
+
+        if (not ok) then
+            chatmsg ("Auctionator: reset step "..i.." failed: "..tostring (err));
         end
     end
 end
@@ -693,6 +973,14 @@ function Auctionator_SetupHookFunctions ()
     
     auctionator_orig_AuctionsCreateAuctionButton_OnClick = AuctionsCreateAuctionButton_OnClick;
     AuctionsCreateAuctionButton_OnClick = Auctionator_AuctionsCreateAuctionButton_OnClick;
+
+    if (AuctionFrameBrowse_Update) then
+        auctionator_orig_AuctionFrameBrowse_Update = AuctionFrameBrowse_Update;
+        AuctionFrameBrowse_Update = Auctionator_AuctionFrameBrowse_Update;
+    end
+
+    auctionator_orig_QueryAuctionItems = QueryAuctionItems;
+    QueryAuctionItems = Auctionator_QueryAuctionItems;
     
 end
 
@@ -768,7 +1056,12 @@ function Auctionator_OnAuctionUpdate ()
     if (processing_state ~= KM_POSTQUERY) then
         return;
     end
-    
+
+    if (buying) then
+        Auctionator_Buy_OnResults ();
+        return;
+    end
+
     if (PanelTemplates_GetSelectedTab (AuctionFrame) ~= AUCTIONATOR_TAB_INDEX) then
         return;
     end;
@@ -842,7 +1135,8 @@ end
 function Auctionator_Process_Scandata ()
 
     sorteddata = {};
-    
+    selected = nil;
+
     if (scandata == nil) then
         return;
     end;
@@ -998,6 +1292,8 @@ end
 function Auctionator_OnAuctionHouseClosed()
 
     Auctionator_MultiPost_Stop ("the auction house was closed", false);
+    Auctionator_Buy_Done ();
+    StaticPopup_Hide ("AUCTIONATOR_BUYOUT");
 
     AuctionatorOptionsFrame:Hide();
     AuctionatorDescriptionFrame:Hide();
@@ -1012,6 +1308,7 @@ end
 function Auctionator_OnUpdate(self, elapsed)
 
     Auctionator_MultiPost_OnUpdate();
+    Auctionator_Buy_OnUpdate();
     Auctionator_Idle (self, elapsed);
 
 end
@@ -1051,9 +1348,9 @@ function Auctionator_Idle(self, elapsed)
         end
     end
     
-    ------- don't rescan while a multi-post batch is swapping items in the slot -------
+    ------- don't rescan while a multi-post batch is swapping items in the slot or a buyout is being searched -------
 
-    if (multi) then
+    if (multi or buying) then
         return;
     end
 
@@ -1069,8 +1366,10 @@ function Auctionator_Idle(self, elapsed)
     if (currentAuctionItemName ~= auctionItemName or currentAuctionStackSize ~= auctionCount or self.NumIdles == 1 or forceMsgAreaUpdate) then
     
         forceMsgAreaUpdate = false;
-        
+
         sorteddata = {};
+        selected = nil;
+        Auctionator_UpdateBuyoutButton();
         Auctionator_ScrollbarUpdate();
 
         currentAuctionItemName  = auctionItemName;
@@ -1185,7 +1484,9 @@ function Auctionator_EntryOnClick()
 --	chatmsg (entryIndex);
     
     basedata = sorteddata[entryIndex];
+    selected = basedata;
 
+    Auctionator_UpdateBuyoutButton();
     Auctionator_UpdateRecommendation();
 
     PlaySound ("igMainMenuOptionCheckBoxOn");
