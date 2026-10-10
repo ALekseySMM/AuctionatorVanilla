@@ -19,7 +19,7 @@ Example: 20 items → Stack size 5, Stacks 4 gives four auctions of 5.
 
 The addon splits the stack in your bags and posts the pieces one after another, then prints a summary in chat. It needs at least one free bag slot. Each stack is taken from a single bag slot (leftovers in different slots are not merged).
 
-![Stack size and Buyout Price](screenshots/ScreenShot%20152%20Github%20WOW%20addon.png)
+![Auctionator 1.10](screenshots/Pic%20for%20v%201.10.png)
 
 > **IMPORTANT!** Remember the rule: if the **Stack Size** field is empty, it is a regular auction. If it contains a number X, the **Buyout Price** is the price for X items!
 
@@ -60,7 +60,7 @@ Copy the folder into `Interface\AddOns\` and name it `Auctionator`. Interface 11
 
 Аддон сам делит стак в сумке и выставляет части по очереди, в конце пишет итог в чат. Нужна минимум одна свободная ячейка в сумке. Каждый стак берётся из одной ячейки (остатки в разных ячейках не объединяются).
 
-![Stack size и Buyout Price](screenshots/ScreenShot%20152%20Github%20WOW%20addon.png)
+![Auctionator 1.10](screenshots/Pic%20for%20v%201.10.png)
 
 > **ВАЖНО!** Запомните правило: если поле **Stack Size** пустое, то это обычный аукцион. Если в нём стоит число Х шт., то цена **Buyout Price** — это цена за Х штук!
 
