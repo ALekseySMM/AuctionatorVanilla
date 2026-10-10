@@ -33,7 +33,7 @@ Click a line in the price list (the highlight the addon sets by itself does not 
 
 ### Other changes
 
-The bottom row of the Auctionator tab is `[Post] [Buyout] [Close]` and uses the Bid tab art, so no empty "Cancel Auction" slot shows. The chat message on load is now "Auctionator Sherai loaded."
+The main point of the changes is making the addon easier to use. If you have any requests, write to me, in the game or here.
 
 ## Installation
 
