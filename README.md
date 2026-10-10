@@ -74,7 +74,8 @@ Copy the folder into `Interface\AddOns\` and name it `Auctionator`. Interface 11
 
 #### Прочее
 
-Нижний ряд вкладки Auctionator: `[Post] [Buyout] [Close]`, он использует рисунок вкладки Bid, поэтому пустого паза «Cancel Auction» не видно. Сообщение в чате при загрузке теперь «Auctionator Sherai loaded.»
+Основная суть изменений - удобство пользования аддоном. 
+Если будут просьбы - пишите. В игре или тут.
 
 ### Установка
 
