@@ -1,5 +1,5 @@
 
-local AuctionatorVersion = "1.0.0-Vanilla";
+local AuctionatorVersion = "1.10";
 local AuctionatorAuthor  = "Zirco; Vanilla adaptation by Nimeral";
 
 
